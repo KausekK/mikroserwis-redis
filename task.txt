@@ -1,0 +1,149 @@
+Zadanie: Mikroserwisy z Redisem, Eureka Discovery Service i API Gateway
+Cel zadania
+Celem zadania jest stworzenie prostej aplikacji mikroserwisowej w Spring Boot, która pokaże problem przechowywania stanu w pamięci aplikacji oraz rozwiązanie tego problemu za pomocą Redisa.
+Aplikacja powinna składać się z:
+Discovery Service — Eureka Server
+API Gateway
+Amount Service — serwis odpowiedzialny za przechowywanie i aktualizowanie wspólnej sumy
+Redis — wspólny magazyn danych dla wielu instancji Amount Service
+Scenariusz biznesowy
+System ma przechowywać jedną wspólną wartość liczbową amount.
+Każde żądanie może dodać do niej nową liczbę.
+Przykład:
+start: amount = 0
+
+POST /amount/add/5  -> amount = 5
+POST /amount/add/3  -> amount = 8
+POST /amount/add/5  -> amount = 13
+Ważne: aplikacja Amount Service ma być uruchomiona w dwóch instancjach.
+Niezależnie od tego, do której instancji trafi request, suma ma być wspólna.
+Wymagania techniczne
+1. Discovery Service
+Utwórz aplikację Spring Boot o nazwie:
+discovery-service
+Aplikacja powinna działać jako Eureka Server.
+Wymagania:
+port: 8761
+dostęp do panelu Eureka przez:
+http://localhost:8761
+2. API Gateway
+Utwórz aplikację Spring Boot o nazwie:
+api-gateway
+Gateway powinien:
+rejestrować się w Eureka
+przekierowywać requesty do amount-service
+działać na porcie 8080
+Requesty na:
+http://localhost:8080/amount/**
+powinny być przekierowywane do serwisu:
+lb://amount-service
+3. Amount Service
+Utwórz aplikację Spring Boot o nazwie:
+amount-service
+Serwis powinien:
+rejestrować się w Eureka jako amount-service
+łączyć się z Redisem
+udostępniać endpointy do obsługi wspólnej sumy
+Wymagane endpointy:
+Dodanie wartości
+POST /amount/add/{value}
+Przykład:
+POST /amount/add/5
+Response:
+{
+  "sum": 5,
+  "instance": "nazwa-instancji"
+}
+Pobranie aktualnej sumy
+GET /amount
+Response:
+{
+  "sum": 13,
+  "instance": "nazwa-instancji"
+}
+Reset wartości
+DELETE /amount
+Po wykonaniu resetu suma powinna wrócić do 0.
+Wymagania dotyczące Redisa
+Wartość amount nie może być przechowywana w polu klasy, np.:
+private long amount = 0;
+To rozwiązanie jest błędne, ponieważ każda instancja aplikacji ma wtedy własną pamięć.
+Wartość powinna być przechowywana w Redisie pod jednym wspólnym kluczem, np.:
+amount:sum
+Do dodawania wartości należy użyć atomowej operacji Redisa:
+redisTemplate.opsForValue().increment("amount:sum", value);
+Nie należy robić ręcznie:
+get -> dodaj -> set
+ponieważ przy wielu instancjach może to powodować race condition.
+Docker
+Przygotuj docker-compose.yml, który uruchamia:
+discovery-service
+api-gateway
+redis
+dwie instancje amount-service
+Można użyć jednego z dwóch podejść.
+Wariant A — skalowanie przez Docker Compose
+W docker-compose.yml definiujemy jeden serwis:
+amount-service:
+  build: ./amount-service
+  environment:
+    SPRING_PROFILES_ACTIVE: docker
+  depends_on:
+    - discovery-service
+    - redis
+Uruchomienie:
+docker compose up -d --build --scale amount-service=2
+W tym wariancie amount-service nie powinien mieć ustawionych ports.
+Wariant B — dwie jawne instancje
+Można też zdefiniować dwie osobne instancje:
+amount-service-1:
+  build: ./amount-service
+  ports:
+    - "8855:8080"
+  environment:
+    SPRING_PROFILES_ACTIVE: docker
+  depends_on:
+    - discovery-service
+    - redis
+
+amount-service-2:
+  build: ./amount-service
+  ports:
+    - "8856:8080"
+  environment:
+    SPRING_PROFILES_ACTIVE: docker
+  depends_on:
+    - discovery-service
+    - redis
+Ten wariant jest łatwiejszy do ręcznego testowania, bo można bezpośrednio wywołać konkretną instancję.
+Test działania
+Po uruchomieniu aplikacji wykonaj:
+curl -X DELETE http://localhost:8080/amount
+Następnie:
+curl -X POST http://localhost:8080/amount/add/5
+curl -X POST http://localhost:8080/amount/add/3
+curl -X POST http://localhost:8080/amount/add/5
+Ostatnia odpowiedź powinna zawierać:
+{
+  "sum": 13
+}
+Pole instance może wskazywać różne instancje aplikacji, ale suma nadal musi być wspólna.
+Dodatkowe zadanie
+Dodaj endpoint:
+GET /amount/history
+który zwróci listę ostatnich dodanych wartości.
+Przykład:
+[5, 3, 5]
+Historia również powinna być przechowywana w Redisie, np. jako lista.
+Podpowiedź:
+redisTemplate.opsForList().rightPush("amount:history", value);
+redisTemplate.opsForList().range("amount:history", 0, -1);
+Pytania kontrolne
+Dlaczego trzymanie wartości w polu klasy nie działa poprawnie przy dwóch instancjach aplikacji?
+Dlaczego amount-service przy skalowaniu przez --scale nie powinien wystawiać portu na hosta?
+Co oznacza zapis 8855:8080 w docker-compose.yml?
+Dlaczego w kontenerze nie używamy localhost do połączenia z Redisem?
+Do czego służy Eureka Discovery Service?
+Co oznacza lb://amount-service w konfiguracji API Gateway?
+Dlaczego operacja increment w Redisie jest lepsza niż ręczne get -> add -> set?
+Jaka jest różnica między cachem w Redisie a przechowywaniem wspólnego stanu w Redisie?

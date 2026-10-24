@@ -1,0 +1,64 @@
+services:
+  discoveryservice:
+    image: discovery-service
+    build: ./discovery-service
+    restart: always
+    ports:
+      - "8761:8761"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    networks:
+      - microservices-network
+
+  apigateway:
+    image: api-gateway
+    build: ./api-gateway
+    restart: always
+    ports:
+      - "8070:8070"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      - discoveryservice
+    networks:
+      - microservices-network
+
+  amountservice1:
+    image: amount-service
+    build: ./amount-service
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      INSTANCE_NAME: amount-service-1
+    depends_on:
+      - discoveryservice
+      - redis
+    networks:
+      - microservices-network
+
+  amountservice2:
+    image: amount-service
+    restart: always
+    ports:
+      - "8081:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      INSTANCE_NAME: amount-service-2
+    depends_on:
+      - discoveryservice
+      - redis
+    networks:
+      - microservices-network
+  redis:
+    image: redis:7
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - microservices-network
+
+networks:
+  microservices-network:
+    driver: bridge
